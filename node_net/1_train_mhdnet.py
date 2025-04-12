@@ -39,149 +39,438 @@ def main():
 
     # 超参数
     num_dimensions = 3
-    batch_size = 2
+    batch_size = 8  # 注意：加深网络可能增加显存需求，必要时可减小到 4
     num_epochs = 200
-    learning_rate = 1e-2
+    learning_rate = 1e-3
     k_folds = 5
     validation_interval = 1
     patience = 200
 
-    # 子网络1（主干，复用 HDNet 配置，去除最后任务分支）
+    # 子网络1（粗处理，保持不变）
     node_configs1 = {
         0: (4, 64, 64, 64),  # 输入节点：4通道图像
         1: (1, 64, 64, 64),  # 输入节点：1通道图像
         2: (32, 64, 64, 64),
         3: (32, 64, 64, 64),
-        4: (64, 16, 16, 16),
-        5: (128, 4, 4, 4),
-        6: (128, 4, 4, 4),
-        7: (128, 4, 4, 4),
-        8: (128, 4, 4, 4),
+        4: (32, 64, 64, 64),
+        5: (64, 32, 32, 32),
     }
     hyperedge_configs1 = {
         "e1": {
-            "src_nodes": [0],
+            "src_nodes": [0, 1],
             "dst_nodes": [2],
             "params": {
-                "convs": [(32, 3, 3, 3)],
-                "norms": ["instance"],
-                "acts": ["leakyrelu"],
+                "convs": [(32, 5, 5, 5), (32, 5, 5, 5)],
+                "norms": ["batch", "batch"],
+                "acts": ["relu", "relu"],
                 "feature_size": (64, 64, 64),
-                "in_p": "linear",
-                "out_p": "linear",
             },
         },
         "e2": {
-            "src_nodes": [1],
+            "src_nodes": [0],
             "dst_nodes": [3],
             "params": {
-                "convs": [(32, 3, 3, 3)],
-                "norms": ["instance"],
-                "acts": ["leakyrelu"],
+                "convs": [(32, 5, 5, 5), (32, 5, 5, 5)],
+                "norms": ["batch", "batch"],
+                "acts": ["relu", "relu"],
                 "feature_size": (64, 64, 64),
-                "in_p": "linear",
-                "out_p": "linear",
             },
         },
         "e3": {
-            "src_nodes": [2, 3],
+            "src_nodes": [1],
             "dst_nodes": [4],
             "params": {
-                "convs": [(64, 3, 3, 3)],
-                "norms": ["instance"],
-                "acts": ["leakyrelu"],
-                "feature_size": (16, 16, 16),
-                "in_p": "linear",
-                "out_p": "linear",
+                "convs": [(32, 5, 5, 5), (32, 5, 5, 5)],
+                "norms": ["batch", "batch"],
+                "acts": ["relu", "relu"],
+                "feature_size": (64, 64, 64),
             },
         },
         "e4": {
-            "src_nodes": [4],
-            "dst_nodes": [5, 6, 7, 8],
+            "src_nodes": [3, 4],
+            "dst_nodes": [5],
             "params": {
-                "convs": [(512, 3, 3, 3), (128, 3, 3, 3)],
-                "norms": ["instance", "instance"],
-                "acts": ["leakyrelu", "leakyrelu"],
-                "feature_size": (4, 4, 4),
-                "in_p": "linear",
-                "out_p": "linear",
+                "convs": [(64, 3, 3, 3), (64, 3, 3, 3)],
+                "norms": ["batch", "batch"],
+                "acts": ["relu", "relu"],
+                "feature_size": (64, 64, 64),
+            },
+        },
+        "e5": {
+            "src_nodes": [2],
+            "dst_nodes": [5],
+            "params": {
+                "convs": [(64, 3, 3, 3), (64, 3, 3, 3)],
+                "norms": ["batch", "batch"],
+                "acts": ["relu", "relu"],
+                "feature_size": (64, 64, 64),
             },
         },
     }
     in_nodes1 = [0, 1]
-    out_nodes1 = [5, 6, 7, 8]
+    out_nodes1 = [5]
 
-    # 子网络2（回归分支）
+    # 子网络2（细处理，模仿 ResNet-18 加深到 8 个残差块）
+    # 修改说明：
+    # - 原结构：4 节点，逐步下采样。
+    # - 新结构：4 个阶段，每个阶段 2 个残差块，共 8 块（16 层卷积），接近 ResNet-18 深度。
+    # - 阶段划分：
+    #   - 阶段1：节点 0-4，64 通道，32x32x32，2 个残差块
+    #   - 阶段2：节点 5-9，128 通道，16x16x16，2 个残差块
+    #   - 阶段3：节点 10-14，256 通道，8x8x8，2 个残差块
+    #   - 阶段4：节点 15-19，512 通道，4x4x4，2 个残差块
+    # - 输出节点 19 保持 (512, 4, 4, 4)，与任务分支兼容。
     node_configs2 = {
-        0: (128, 4, 4, 4),  # 输入，连接子网络1的输出
-        1: (1, 1, 1, 1),   # 输出：回归任务
+        0: (64, 32, 32, 32),   # 输入，连接子网络1
+        # 阶段1：64 通道，32x32x32
+        1: (64, 32, 32, 32),   # 残差块1
+        2: (64, 32, 32, 32),   # 残差块1 输出
+        3: (64, 32, 32, 32),   # 残差块2
+        4: (64, 32, 32, 32),   # 残差块2 输出
+        # 阶段2：128 通道，16x16x16
+        5: (128, 16, 16, 16),  # 残差块3（下采样）
+        6: (128, 16, 16, 16),  # 残差块3 输出
+        7: (128, 16, 16, 16),  # 残差块4
+        8: (128, 16, 16, 16),  # 残差块4 输出
+        # 阶段3：256 通道，8x8x8
+        9: (256, 8, 8, 8),     # 残差块5（下采样）
+        10: (256, 8, 8, 8),    # 残差块5 输出
+        11: (256, 8, 8, 8),    # 残差块6
+        12: (256, 8, 8, 8),    # 残差块6 输出
+        # 阶段4：512 通道，4x4x4
+        13: (512, 4, 4, 4),    # 残差块7（下采样）
+        14: (512, 4, 4, 4),    # 残差块7 输出
+        15: (512, 4, 4, 4),    # 残差块8
+        16: (512, 4, 4, 4),    # 残差块8 输出
+        # 输出调整
+        17: (512, 4, 4, 4),    # 最终输出
     }
     hyperedge_configs2 = {
+        # 阶段1，残差块1：0 -> 1 -> 2，0 到 2 跳跃
         "e1": {
             "src_nodes": [0],
             "dst_nodes": [1],
             "params": {
-                "convs": [(32, 1, 1, 1)],
-                "feature_size": (1, 1, 1),
-                "in_p": "linear",
-                "out_p": "linear",
+                "convs": [(64, 3, 3, 3), (64, 3, 3, 3)],
+                "norms": ["batch", "batch"],
+                "acts": ["relu", "relu"],
+                "feature_size": (32, 32, 32),
+            },
+        },
+        "e2": {
+            "src_nodes": [1],
+            "dst_nodes": [2],
+            "params": {
+                "convs": [(64, 3, 3, 3), (64, 3, 3, 3)],
+                "norms": ["batch", "batch"],
+                "acts": ["relu", "relu"],
+                "feature_size": (32, 32, 32),
+            },
+        },
+        "e3": {
+            "src_nodes": [0],
+            "dst_nodes": [2],
+            "params": {
+                "convs": [],  # 跳跃连接，直接相加
+                "feature_size": (32, 32, 32),
+            },
+        },
+        # 残差块2：2 -> 3 -> 4，2 到 4 跳跃
+        "e4": {
+            "src_nodes": [2],
+            "dst_nodes": [3],
+            "params": {
+                "convs": [(64, 3, 3, 3), (64, 3, 3, 3)],
+                "norms": ["batch", "batch"],
+                "acts": ["relu", "relu"],
+                "feature_size": (32, 32, 32),
+            },
+        },
+        "e5": {
+            "src_nodes": [3],
+            "dst_nodes": [4],
+            "params": {
+                "convs": [(64, 3, 3, 3), (64, 3, 3, 3)],
+                "norms": ["batch", "batch"],
+                "acts": ["relu", "relu"],
+                "feature_size": (32, 32, 32),
+            },
+        },
+        "e6": {
+            "src_nodes": [2],
+            "dst_nodes": [4],
+            "params": {
+                "convs": [],  # 跳跃连接，直接相加
+                "feature_size": (32, 32, 32),
+            },
+        },
+        # 阶段2，残差块3：4 -> 5 -> 6，4 到 6 跳跃（下采样）
+        "e7": {
+            "src_nodes": [4],
+            "dst_nodes": [5],
+            "params": {
+                "convs": [(128, 3, 3, 3), (128, 3, 3, 3)],
+                "norms": ["batch", "batch"],
+                "acts": ["relu", "relu"],
+                "feature_size": (32, 32, 32),
+                "out_p": 2,
+            },
+        },
+        "e8": {
+            "src_nodes": [5],
+            "dst_nodes": [6],
+            "params": {
+                "convs": [(128, 3, 3, 3), (128, 3, 3, 3)],
+                "norms": ["batch", "batch"],
+                "acts": ["relu", "relu"],
+                "feature_size": (16, 16, 16),
+            },
+        },
+        "e9": {
+            "src_nodes": [4],
+            "dst_nodes": [6],
+            "params": {
+                "convs": [(128, 1, 1, 1)],  # 跳跃连接，调整通道
+                "norms": ["batch"],
+                "feature_size": (32, 32, 32),
+                "out_p": 2,
+            },
+        },
+        # 残差块4：6 -> 7 -> 8，6 到 8 跳跃
+        "e10": {
+            "src_nodes": [6],
+            "dst_nodes": [7],
+            "params": {
+                "convs": [(128, 3, 3, 3), (128, 3, 3, 3)],
+                "norms": ["batch", "batch"],
+                "acts": ["relu", "relu"],
+                "feature_size": (16, 16, 16),
+            },
+        },
+        "e11": {
+            "src_nodes": [7],
+            "dst_nodes": [8],
+            "params": {
+                "convs": [(128, 3, 3, 3), (128, 3, 3, 3)],
+                "norms": ["batch", "batch"],
+                "acts": ["relu", "relu"],
+                "feature_size": (16, 16, 16),
+            },
+        },
+        "e12": {
+            "src_nodes": [6],
+            "dst_nodes": [8],
+            "params": {
+                "convs": [],  # 跳跃连接，直接相加
+                "feature_size": (16, 16, 16),
+            },
+        },
+        # 阶段3，残差块5：8 -> 9 -> 10，8 到 10 跳跃（下采样）
+        "e13": {
+            "src_nodes": [8],
+            "dst_nodes": [9],
+            "params": {
+                "convs": [(256, 3, 3, 3), (256, 3, 3, 3)],
+                "norms": ["batch", "batch"],
+                "acts": ["relu", "relu"],
+                "feature_size": (16, 16, 16),
+                "out_p": 2,
+            },
+        },
+        "e14": {
+            "src_nodes": [9],
+            "dst_nodes": [10],
+            "params": {
+                "convs": [(256, 3, 3, 3), (256, 3, 3, 3)],
+                "norms": ["batch", "batch"],
+                "acts": ["relu", "relu"],
+                "feature_size": (8, 8, 8),
+            },
+        },
+        "e15": {
+            "src_nodes": [8],
+            "dst_nodes": [10],
+            "params": {
+                "convs": [(256, 1, 1, 1)],  # 跳跃连接，调整通道
+                "norms": ["batch"],
+                "feature_size": (16, 16, 16),
+                "out_p": 2,
+            },
+        },
+        # 残差块6：10 -> 11 -> 12，10 到 12 跳跃
+        "e16": {
+            "src_nodes": [10],
+            "dst_nodes": [11],
+            "params": {
+                "convs": [(256, 3, 3, 3), (256, 3, 3, 3)],
+                "norms": ["batch", "batch"],
+                "acts": ["relu", "relu"],
+                "feature_size": (8, 8, 8),
+            },
+        },
+        "e17": {
+            "src_nodes": [11],
+            "dst_nodes": [12],
+            "params": {
+                "convs": [(256, 3, 3, 3), (256, 3, 3, 3)],
+                "norms": ["batch", "batch"],
+                "acts": ["relu", "relu"],
+                "feature_size": (8, 8, 8),
+            },
+        },
+        "e18": {
+            "src_nodes": [10],
+            "dst_nodes": [12],
+            "params": {
+                "convs": [],  # 跳跃连接，直接相加
+                "feature_size": (8, 8, 8),
+            },
+        },
+        # 阶段4，残差块7：12 -> 13 -> 14，12 到 14 跳跃（下采样）
+        "e19": {
+            "src_nodes": [12],
+            "dst_nodes": [13],
+            "params": {
+                "convs": [(512, 3, 3, 3), (512, 3, 3, 3)],
+                "norms": ["batch", "batch"],
+                "acts": ["relu", "relu"],
+                "feature_size": (8, 8, 8),
+                "out_p": 2,
+            },
+        },
+        "e20": {
+            "src_nodes": [13],
+            "dst_nodes": [14],
+            "params": {
+                "convs": [(512, 3, 3, 3), (512, 3, 3, 3)],
+                "norms": ["batch", "batch"],
+                "acts": ["relu", "relu"],
+                "feature_size": (4, 4, 4),
+            },
+        },
+        "e21": {
+            "src_nodes": [12],
+            "dst_nodes": [14],
+            "params": {
+                "convs": [(512, 1, 1, 1)],  # 跳跃连接，调整通道
+                "norms": ["batch"],
+                "feature_size": (8, 8, 8),
+                "out_p": 2,
+            },
+        },
+        # 残差块8：14 -> 15 -> 16，14 到 16 跳跃
+        "e22": {
+            "src_nodes": [14],
+            "dst_nodes": [15],
+            "params": {
+                "convs": [(512, 3, 3, 3), (512, 3, 3, 3)],
+                "norms": ["batch", "batch"],
+                "acts": ["relu", "relu"],
+                "feature_size": (4, 4, 4),
+            },
+        },
+        "e23": {
+            "src_nodes": [15],
+            "dst_nodes": [16],
+            "params": {
+                "convs": [(512, 3, 3, 3), (512, 3, 3, 3)],
+                "norms": ["batch", "batch"],
+                "acts": ["relu", "relu"],
+                "feature_size": (4, 4, 4),
+            },
+        },
+        "e24": {
+            "src_nodes": [14],
+            "dst_nodes": [16],
+            "params": {
+                "convs": [],  # 跳跃连接，直接相加
+                "feature_size": (4, 4, 4),
+            },
+        },
+        # 最终输出：16 -> 17
+        "e25": {
+            "src_nodes": [16],
+            "dst_nodes": [17],
+            "params": {
+                "convs": [(512, 3, 3, 3)],
+                "norms": ["batch"],
+                "acts": ["relu"],
+                "feature_size": (4, 4, 4),
             },
         },
     }
     in_nodes2 = [0]
-    out_nodes2 = [1]
+    out_nodes2 = [17]  # 输出节点为 17，形状 (512, 4, 4, 4)
 
-    # 子网络3（分类分支，支持多分类任务）
+    # 子网络3（回归任务，保持不变）
     node_configs3 = {
-        0: (128, 4, 4, 4),  # 输入，连接子网络1的输出
-        1: (4, 1, 1, 1),   # Feature_1：分类任务，4类
-        2: (4, 1, 1, 1),   # Feature_2：分类任务，4类
-        3: (2, 1, 1, 1),   # Feature_4：分类任务，2类
-        4: (2, 1, 1, 1),   # Feature_5：分类任务，2类
-        5: (2, 1, 1, 1),   # Feature_6：分类任务，2类
-        6: (3, 1, 1, 1),   # Feature_7：分类任务，3类
-        7: (2, 1, 1, 1),   # Feature_8：分类任务，2类
+        0: (512, 4, 4, 4),  # 输入，连接子网络2
+        1: (1, 1, 1, 1),   # 输出：回归任务
     }
     hyperedge_configs3 = {
         "e1": {
             "src_nodes": [0],
-            "dst_nodes": [1, 2, 3, 4, 5, 6, 7],
+            "dst_nodes": [1],
             "params": {
-                "convs": [(32, 1, 1, 1)],
                 "feature_size": (1, 1, 1),
-                "in_p": "linear",
-                "out_p": "linear",
+                "convs": [],
             },
         },
     }
     in_nodes3 = [0]
-    out_nodes3 = [1, 2, 3, 4, 5, 6, 7]
+    out_nodes3 = [1]
+
+    # 子网络4（4分类任务）
+    node_configs4 = deepcopy(node_configs3)
+    node_configs4.update({1: (4, 1, 1, 1)})
+
+    # 子网络5（2分类任务）
+    node_configs5 = deepcopy(node_configs3)
+    node_configs5.update({1: (2, 1, 1, 1)})
+
+    # 子网络6（3分类任务）
+    node_configs6 = deepcopy(node_configs3)
+    node_configs6.update({1: (3, 1, 1, 1)})
 
     # 全局节点映射
     node_mapping = [
-        (100, "net1", 0),  # 全局输入：4通道图像
-        (101, "net1", 1),  # 全局输入：1通道图像
-        (102, "net1", 5),  # 子网络1输出，连接到子网络2和3
-        (102, "net2", 0),  # 子网络2输入
-        (102, "net3", 0),  # 子网络3输入
-        (103, "net2", 1),  # 全局输出：回归任务（Feature_3）
-        (104, "net3", 1),  # 全局输出：分类任务（Feature_1）
-        (105, "net3", 2),  # 全局输出：分类任务（Feature_2）
-        (106, "net3", 3),  # 全局输出：分类任务（Feature_4）
-        (107, "net3", 4),  # 全局输出：分类任务（Feature_5）
-        (108, "net3", 5),  # 全局输出：分类任务（Feature_6）
-        (109, "net3", 6),  # 全局输出：分类任务（Feature_7）
-        (110, "net3", 7),  # 全局输出：分类任务（Feature_8）
+        (100, "pre", 0),  # 全局输入：4通道图像
+        (101, "pre", 1),  # 全局输入：1通道图像
+        (102, "pre", 5),  # 子网络1输出
+        (102, "main", 0), # 子网络2输入
+        (103, "main", 17),# 子网络2输出，改为节点 17
+        (103, "reg1", 0), # 回归任务输入
+        (103, "cls1", 0), # 分类任务输入
+        (103, "cls2", 0),
+        (103, "cls3", 0),
+        (103, "cls4", 0),
+        (103, "cls5", 0),
+        (103, "cls6", 0),
+        (103, "cls7", 0),
+        (104, "reg1", 1), # 回归任务输出
+        (105, "cls1", 1), # 分类任务输出
+        (106, "cls2", 1),
+        (107, "cls3", 1),
+        (108, "cls4", 1),
+        (109, "cls5", 1),
+        (110, "cls6", 1),
+        (111, "cls7", 1),
     ]
 
-    # 子网络配置字典
+    # 子网络实例化
     sub_networks_configs = {
-        "net1": (node_configs1, hyperedge_configs1, in_nodes1, out_nodes1),
-        "net2": (node_configs2, hyperedge_configs2, in_nodes2, out_nodes2),
-        "net3": (node_configs3, hyperedge_configs3, in_nodes3, out_nodes3),
+        "pre": (node_configs1, hyperedge_configs1, in_nodes1, out_nodes1),
+        "main": (node_configs2, hyperedge_configs2, in_nodes2, out_nodes2),
+        "reg1": (node_configs3, hyperedge_configs3, in_nodes3, out_nodes3),
+        "cls1": (node_configs4, hyperedge_configs3, in_nodes3, out_nodes3),
+        "cls2": (node_configs4, hyperedge_configs3, in_nodes3, out_nodes3),
+        "cls3": (node_configs5, hyperedge_configs3, in_nodes3, out_nodes3),
+        "cls4": (node_configs5, hyperedge_configs3, in_nodes3, out_nodes3),
+        "cls5": (node_configs5, hyperedge_configs3, in_nodes3, out_nodes3),
+        "cls6": (node_configs6, hyperedge_configs3, in_nodes3, out_nodes3),
+        "cls7": (node_configs5, hyperedge_configs3, in_nodes3, out_nodes3),
     }
 
-    # 子网络实例化
     sub_networks = {
         name: HDNet(node_configs, hyperedge_configs, in_nodes, out_nodes, num_dimensions)
         for name, (node_configs, hyperedge_configs, in_nodes, out_nodes) in sub_networks_configs.items()
@@ -200,7 +489,7 @@ def main():
 
     # 全局输入输出节点
     in_nodes = [100, 101]
-    out_nodes = [103, 104, 105, 106, 107, 108, 109, 110]
+    out_nodes = [104, 105, 106, 107, 108, 109, 110, 111]
 
     # 外部实例化变换对象
     random_rotate = RandomRotate3D()
@@ -218,14 +507,14 @@ def main():
 
     # 任务与节点映射
     task_node_map = {
-        "Feature_1": 104,  # 分类任务，4类
-        "Feature_2": 105,  # 分类任务，4类
-        "Feature_3": 103,  # 回归任务
-        "Feature_4": 106,  # 分类任务，2类
-        "Feature_5": 107,  # 分类任务，2类
-        "Feature_6": 108,  # 分类任务，2类
-        "Feature_7": 109,  # 分类任务，3类
-        "Feature_8": 110,  # 分类任务，2类
+        "Feature_1": 105,  # 分类任务，4类
+        "Feature_2": 106,  # 分类任务，4类
+        "Feature_3": 104,  # 回归任务
+        "Feature_4": 107,  # 分类任务，2类
+        "Feature_5": 108,  # 分类任务，2类
+        "Feature_6": 109,  # 分类任务，2类
+        "Feature_7": 110,  # 分类任务，3类
+        "Feature_8": 111,  # 分类任务，2类
     }
 
     cls_features = ['Feature_1', 'Feature_2', 'Feature_4', 'Feature_5', 'Feature_6', 'Feature_7', 'Feature_8']
@@ -243,8 +532,8 @@ def main():
 
     # 输入节点图像后缀映射
     node_image_mappings = {
-        100: ["0000", "0001", "0002", "0003"],  # 节点 100 的所有图像后缀
-        101: ["0004"],                         # 节点 101 的所有图像后缀
+        100: ["0000", "0001", "0002", "0003"],
+        101: ["0004"],
     }
 
     # 创建所有输入节点的数据集
