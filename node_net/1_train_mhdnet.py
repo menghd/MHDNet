@@ -7,9 +7,10 @@ import numpy as np
 import json
 from sklearn.model_selection import KFold
 from torch.optim.lr_scheduler import LambdaLR
+from copy import deepcopy
 
 sys.path.append(r"C:\Users\PC\PycharmProjects\thu_xwh\Codes")
-from node_toolkit.mhdnet import MHDNet, HDNet  # 使用新的 MHDNet
+from node_toolkit.mhdnet import MHDNet, HDNet
 from node_toolkit.node_dataset import NodeDataset
 from node_toolkit.node_loss import focal_loss, mse_loss
 from node_toolkit.node_utils import train, validate
@@ -173,11 +174,28 @@ def main():
         (110, "net3", 7),  # 全局输出：分类任务（Feature_8）
     ]
 
-    # 子网络实例化（需要在模型初始化前定义）
+    # 子网络配置字典
+    sub_networks_configs = {
+        "net1": (node_configs1, hyperedge_configs1, in_nodes1, out_nodes1),
+        "net2": (node_configs2, hyperedge_configs2, in_nodes2, out_nodes2),
+        "net3": (node_configs3, hyperedge_configs3, in_nodes3, out_nodes3),
+    }
+
+    # 子网络实例化
     sub_networks = {
-        "net1": HDNet(node_configs1, hyperedge_configs1, in_nodes1, out_nodes1, num_dimensions),
-        "net2": HDNet(node_configs2, hyperedge_configs2, in_nodes2, out_nodes2, num_dimensions),
-        "net3": HDNet(node_configs3, hyperedge_configs3, in_nodes3, out_nodes3, num_dimensions),
+        name: HDNet(node_configs, hyperedge_configs, in_nodes, out_nodes, num_dimensions)
+        for name, (node_configs, hyperedge_configs, in_nodes, out_nodes) in sub_networks_configs.items()
+    }
+
+    # 动态生成配置字典
+    config_dict = {
+        name: {
+            "node_configs": {str(k): list(v) for k, v in node_configs.items()},
+            "hyperedge_configs": deepcopy(hyperedge_configs),
+            "in_nodes": in_nodes,
+            "out_nodes": out_nodes,
+        }
+        for name, (node_configs, hyperedge_configs, in_nodes, out_nodes) in sub_networks_configs.items()
     }
 
     # 全局输入输出节点
@@ -381,26 +399,7 @@ def main():
                     save_path = os.path.join(save_dir, f"model_fold{fold + 1}_best.pth")
                     torch.save(model.state_dict(), save_path)
                     config = {
-                        "sub_networks": {
-                            "net1": {
-                                "node_configs": {str(k): list(v) for k, v in node_configs1.items()},
-                                "hyperedge_configs": hyperedge_configs1,
-                                "in_nodes": in_nodes1,
-                                "out_nodes": out_nodes1,
-                            },
-                            "net2": {
-                                "node_configs": {str(k): list(v) for k, v in node_configs2.items()},
-                                "hyperedge_configs": hyperedge_configs2,
-                                "in_nodes": in_nodes2,
-                                "out_nodes": out_nodes2,
-                            },
-                            "net3": {
-                                "node_configs": {str(k): list(v) for k, v in node_configs3.items()},
-                                "hyperedge_configs": hyperedge_configs3,
-                                "in_nodes": in_nodes3,
-                                "out_nodes": out_nodes3,
-                            },
-                        },
+                        "sub_networks": config_dict,
                         "node_mapping": node_mapping,
                         "in_nodes": in_nodes,
                         "out_nodes": out_nodes,
