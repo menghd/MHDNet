@@ -202,8 +202,9 @@ class HDNet(nn.Module):
         # p 次幂插值
         spatial_dims = tuple(range(2, 2 + self.num_dimensions))
         min_vals = torch.amin(x, dim=spatial_dims, keepdim=True)
-        x_nonneg = torch.clamp(x - min_vals, min=0.0)
-        x_pow = torch.pow(x_nonneg, p)
+        max_vals = torch.amax(x, dim=spatial_dims, keepdim=True)
+        x_norm = torch.clamp((x - min_vals)/(max_vals-min_vals), min=0.0)
+        x_pow = torch.pow(x_norm + 1e-8, p)
         x_resized = F.interpolate(
             x_pow,
             size=target_size,
@@ -211,13 +212,7 @@ class HDNet(nn.Module):
             align_corners=True,
         )
         x_root = torch.pow(x_resized, 1.0 / p)
-        min_vals_resized = F.interpolate(
-            min_vals,
-            size=target_size,
-            mode=self._get_interpolate_mode("linear"),
-            align_corners=True,
-        )
-        return x_root + min_vals_resized
+        return x_root * (max_vals-min_vals) + min_vals
 
     def forward(self, inputs: List[torch.Tensor]) -> torch.Tensor:
         """前向传播。
