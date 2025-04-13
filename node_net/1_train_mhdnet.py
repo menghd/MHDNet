@@ -48,17 +48,23 @@ def main():
 
     # 子网络1（粗处理，保持不变）
     node_configs1 = {
-        0: (4, 64, 64, 64),  # 输入节点：4通道图像
-        1: (1, 64, 64, 64),  # 输入节点：1通道图像
-        2: (32, 64, 64, 64),
-        3: (32, 64, 64, 64),
-        4: (32, 64, 64, 64),
-        5: (64, 32, 32, 32),
+        0: (1, 64, 64, 64),  
+        1: (1, 64, 64, 64), 
+        2: (1, 64, 64, 64), 
+        3: (1, 64, 64, 64), 
+        4: (1, 64, 64, 64), 
+        5: (32, 64, 64, 64),  
+        6: (32, 64, 64, 64),
+        7: (32, 64, 64, 64),
+        8: (32, 64, 64, 64),
+        9: (32, 64, 64, 64),
+        10: (32, 64, 64, 64),
+        11: (64, 32, 32, 32),
     }
     hyperedge_configs1 = {
         "e1": {
-            "src_nodes": [0, 1],
-            "dst_nodes": [2],
+            "src_nodes": [0, 1, 2, 3, 4],
+            "dst_nodes": [5],
             "params": {
                 "convs": [(32, 5, 5, 5), (32, 5, 5, 5)],
                 "norms": ["batch", "batch"],
@@ -68,7 +74,7 @@ def main():
         },
         "e2": {
             "src_nodes": [0],
-            "dst_nodes": [3],
+            "dst_nodes": [6],
             "params": {
                 "convs": [(32, 5, 5, 5), (32, 5, 5, 5)],
                 "norms": ["batch", "batch"],
@@ -78,7 +84,7 @@ def main():
         },
         "e3": {
             "src_nodes": [1],
-            "dst_nodes": [4],
+            "dst_nodes": [7],
             "params": {
                 "convs": [(32, 5, 5, 5), (32, 5, 5, 5)],
                 "norms": ["batch", "batch"],
@@ -87,18 +93,38 @@ def main():
             },
         },
         "e4": {
-            "src_nodes": [3, 4],
-            "dst_nodes": [5],
+            "src_nodes": [2],
+            "dst_nodes": [8],
             "params": {
-                "convs": [(64, 3, 3, 3), (64, 3, 3, 3)],
+                "convs": [(32, 5, 5, 5), (32, 5, 5, 5)],
                 "norms": ["batch", "batch"],
                 "acts": ["relu", "relu"],
                 "feature_size": (64, 64, 64),
             },
         },
         "e5": {
-            "src_nodes": [2],
-            "dst_nodes": [5],
+            "src_nodes": [3],
+            "dst_nodes": [9],
+            "params": {
+                "convs": [(32, 5, 5, 5), (32, 5, 5, 5)],
+                "norms": ["batch", "batch"],
+                "acts": ["relu", "relu"],
+                "feature_size": (64, 64, 64),
+            },
+        },
+        "e6": {
+            "src_nodes": [4],
+            "dst_nodes": [10],
+            "params": {
+                "convs": [(32, 5, 5, 5), (32, 5, 5, 5)],
+                "norms": ["batch", "batch"],
+                "acts": ["relu", "relu"],
+                "feature_size": (64, 64, 64),
+            },
+        },
+        "e7": {
+            "src_nodes": [6, 7, 8, 9, 10],
+            "dst_nodes": [11],
             "params": {
                 "convs": [(64, 3, 3, 3), (64, 3, 3, 3)],
                 "norms": ["batch", "batch"],
@@ -106,9 +132,20 @@ def main():
                 "feature_size": (64, 64, 64),
             },
         },
+        "e8": {
+            "src_nodes": [5],
+            "dst_nodes": [11],
+            "params": {
+                "convs": [(64, 3, 3, 3), (64, 3, 3, 3)],
+                "norms": ["batch", "batch"],
+                "acts": ["relu", "relu"],
+                "feature_size": (64, 64, 64),
+                "out_p": "max"
+            },
+        },
     }
-    in_nodes1 = [0, 1]
-    out_nodes1 = [5]
+    in_nodes1 = [0, 1, 2, 3, 4]
+    out_nodes1 = [11]
 
     # 子网络2（细处理，模仿 ResNet-18 加深到 8 个残差块）
     # 修改说明：
@@ -434,27 +471,30 @@ def main():
 
     # 全局节点映射
     node_mapping = [
-        (100, "pre", 0),  # 全局输入：4通道图像
+        (100, "pre", 0),  # 全局输入：1通道图像
         (101, "pre", 1),  # 全局输入：1通道图像
-        (102, "pre", 5),  # 子网络1输出
-        (102, "main", 0), # 子网络2输入
-        (103, "main", 17),# 子网络2输出，改为节点 17
-        (103, "reg1", 0), # 回归任务输入
-        (103, "cls1", 0), # 分类任务输入
-        (103, "cls2", 0),
-        (103, "cls3", 0),
-        (103, "cls4", 0),
-        (103, "cls5", 0),
-        (103, "cls6", 0),
-        (103, "cls7", 0),
-        (104, "reg1", 1), # 回归任务输出
-        (105, "cls1", 1), # 分类任务输出
-        (106, "cls2", 1),
-        (107, "cls3", 1),
-        (108, "cls4", 1),
-        (109, "cls5", 1),
-        (110, "cls6", 1),
-        (111, "cls7", 1),
+        (102, "pre", 2),  # 全局输入：1通道图像
+        (103, "pre", 3),  # 全局输入：1通道图像
+        (104, "pre", 4),  # 全局输入：1通道图像
+        (200, "pre", 11),  # 子网络1输出
+        (200, "main", 0), # 子网络2输入
+        (300, "main", 17),# 子网络2输出，改为节点 17
+        (300, "reg1", 0), # 回归任务输入
+        (300, "cls1", 0), # 分类任务输入
+        (300, "cls2", 0),
+        (300, "cls3", 0),
+        (300, "cls4", 0),
+        (300, "cls5", 0),
+        (300, "cls6", 0),
+        (300, "cls7", 0),
+        (400, "reg1", 1), # 回归任务输出
+        (401, "cls1", 1), # 分类任务输出
+        (402, "cls2", 1),
+        (403, "cls3", 1),
+        (404, "cls4", 1),
+        (405, "cls5", 1),
+        (406, "cls6", 1),
+        (407, "cls7", 1),
     ]
 
     # 子网络实例化
@@ -488,8 +528,8 @@ def main():
     }
 
     # 全局输入输出节点
-    in_nodes = [100, 101]
-    out_nodes = [104, 105, 106, 107, 108, 109, 110, 111]
+    in_nodes = [100, 101, 102, 103, 104]
+    out_nodes = [400, 401, 402, 403, 404, 405, 406, 407]
 
     # 外部实例化变换对象
     random_rotate = RandomRotate3D()
@@ -502,38 +542,44 @@ def main():
     # 每个节点的变换列表
     node_transforms = {
         100: [random_rotate, random_flip, random_shift, random_zoom, min_max_normalize, z_score_normalize],
-        101: [random_rotate, random_flip, random_shift, random_zoom],
+        101: [random_rotate, random_flip, random_shift, random_zoom, min_max_normalize, z_score_normalize],
+        102: [random_rotate, random_flip, random_shift, random_zoom, min_max_normalize, z_score_normalize],
+        103: [random_rotate, random_flip, random_shift, random_zoom, min_max_normalize, z_score_normalize],
+        104: [random_rotate, random_flip, random_shift, random_zoom],
     }
 
     # 任务与节点映射
     task_node_map = {
-        "Feature_1": 105,  # 分类任务，4类
-        "Feature_2": 106,  # 分类任务，4类
-        "Feature_3": 104,  # 回归任务
-        "Feature_4": 107,  # 分类任务，2类
-        "Feature_5": 108,  # 分类任务，2类
-        "Feature_6": 109,  # 分类任务，2类
-        "Feature_7": 110,  # 分类任务，3类
-        "Feature_8": 111,  # 分类任务，2类
+        "Feature_1": 401,  # 分类任务，4类
+        "Feature_2": 402,  # 分类任务，4类
+        "Feature_3": 400,  # 回归任务
+        "Feature_4": 403,  # 分类任务，2类
+        "Feature_5": 404,  # 分类任务，2类
+        "Feature_6": 405,  # 分类任务，2类
+        "Feature_7": 406,  # 分类任务，3类
+        "Feature_8": 407,  # 分类任务，2类
     }
 
     cls_features = ['Feature_1', 'Feature_2', 'Feature_4', 'Feature_5', 'Feature_6', 'Feature_7', 'Feature_8']
     reg_features = ['Feature_3']
     lambda_weights = {'cls': [0.4, 0.25, 0.05, 0.05, 0.05, 0.05, 0.05], 'reg': [0.1]}
     focal_params = {
-        'Feature_1': ([1.0, 1.0, 1.0, 1.0], 2),
-        'Feature_2': ([1.0, 1.0, 1.0, 1.0], 2),
-        'Feature_4': ([1.0, 1.0], 2),
-        'Feature_5': ([1.0, 1.0], 2),
-        'Feature_6': ([1.0, 1.0], 2),
-        'Feature_7': ([1.0, 1.0, 1.0], 2),
-        'Feature_8': ([1.0, 1.0], 2),
+        'Feature_1': ([1.0, 1.0, 1.0, 1.0], 0),
+        'Feature_2': ([1.0, 1.0, 1.0, 1.0], 0),
+        'Feature_4': ([1.0, 1.0], 0),
+        'Feature_5': ([1.0, 1.0], 0),
+        'Feature_6': ([1.0, 1.0], 0),
+        'Feature_7': ([1.0, 1.0, 1.0], 0),
+        'Feature_8': ([1.0, 1.0], 0),
     }
 
     # 输入节点图像后缀映射
     node_image_mappings = {
-        100: ["0000", "0001", "0002", "0003"],
-        101: ["0004"],
+        100: ["0000"],
+        101: ["0001"],
+        102: ["0002"],
+        103: ["0003"],
+        104: ["0004"],
     }
 
     # 创建所有输入节点的数据集
